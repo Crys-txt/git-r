@@ -1,4 +1,5 @@
--- Loads, holds and saves each player's permanent progress (pearls, catches, wings, best depth).
+-- Loads, holds and saves each player's permanent progress.
+-- catches = fish you own (shown in the aquarium, sold at the shop); discovered = every species ever caught.
 local DataStoreService = game:GetService("DataStoreService")
 
 local PlayerData = {}
@@ -13,7 +14,15 @@ if not storeOk then
 end
 
 local function newProfile()
-	return { pearls = 0, catches = {}, wings = { ReefTank = true }, bestDepth = 0, dives = 0 }
+	return {
+		pearls = 0,
+		catches = {},
+		discovered = {},
+		wings = { ReefTank = true },
+		equipment = {},
+		bestDepth = 0,
+		dives = 0,
+	}
 end
 
 local function keyFor(player)
@@ -34,6 +43,10 @@ function PlayerData.load(player)
 				profile[field] = value
 			end
 		end
+	end
+	-- Saves from before `discovered` existed: everything you own has been discovered.
+	for id in profile.catches do
+		profile.discovered[id] = true
 	end
 	if not player.Parent then
 		return nil -- left while loading

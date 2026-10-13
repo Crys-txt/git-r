@@ -1,16 +1,20 @@
--- One dive per player: shuffled floors, oxygen ticking, catches, hazards, gadget picks and the end of a run.
+-- One dive per player: shuffled underwater floors, oxygen ticking, catches (by touch or harpoon), hazards
+-- and the end of a run. Equipment and wings shape a dive only through Stats.compute.
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerStorage = game:GetService("ServerStorage")
 local TweenService = game:GetService("TweenService")
 
 local Config = require(ReplicatedStorage.DeepDive.Config)
+local Stats = require(ReplicatedStorage.DeepDive.Stats)
 local PlayerData = require(script.Parent.PlayerData)
 local FloorMechanics = require(script.Parent.FloorMechanics)
 
 local Remotes = ReplicatedStorage.DeepDive.Remotes
 local templates = ServerStorage.DeepDive.FloorTemplates
 local harborSpawn = workspace:WaitForChild("Harbor"):WaitForChild("HarborSpawn")
+
+local HARPOON_TOLERANCE = 4 -- studs of slack for latency when checking harpoon range
 
 local activeDives = Instance.new("Folder")
 activeDives.Name = "ActiveDives"
@@ -28,6 +32,14 @@ local function ownerOf(hit)
 	return Players:GetPlayerFromCharacter(hit.Parent)
 end
 
+local function humanoidOf(player)
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if humanoid and humanoid.Health > 0 then
+		return humanoid, character
+	end
+end
+
 local function shuffled(list)
 	local copy = table.clone(list)
 	for i = #copy, 2, -1 do
@@ -35,6 +47,23 @@ local function shuffled(list)
 		copy[i], copy[j] = copy[j], copy[i]
 	end
 	return copy
+end
+
+-- Random order within each difficulty, easier floors first (template attribute Difficulty, default 1).
+local function floorOrder()
+	local order = shuffled(templates:GetChildren())
+	local position = {}
+	for i, template in order do
+		position[template] = i
+	end
+	table.sort(order, function(a, b)
+		local da, db = a:GetAttribute("Difficulty") or 1, b:GetAttribute("Difficulty") or 1
+		if da ~= db then
+			return da < db
+		end
+		return position[a] < position[b]
+	end)
+	return order
 end
 
 -- Weighted by rarity; hard-to-reach spots never roll a Common.
@@ -62,18 +91,18 @@ local function rollCreature(hard)
 end
 
 local function setOxygen(run, value)
-	run.oxygen = math.clamp(value, 0, Config.OXYGEN_MAX)
+	run.oxygen = math.clamp(value, 0, run.maxOxygen)
 	run.player:SetAttribute("Oxygen", run.oxygen)
 end
 
 local function teleportToStart(run)
-	local character = run.player.Character
+	local _, character = humanoidOf(run.player)
 	local start = run.floor and run.floor:FindFirstChild("Start")
 	if not (character and start) then
 		return
 	end
 	-- Floors run along +Z, so turn the character to face the course.
-	character:PivotTo(start.CFrame * CFrame.new(0, 4, 0) * CFrame.Angles(0, math.pi, 0))
+	character:PivotTo(start.CFrame * CFrame.new(0, 3, 0) * CFrame.Angles(0, math.pi, 0))
 	local root = character:FindFirstChild("HumanoidRootPart")
 	if root then
 		root.AssemblyLinearVelocity = Vector3.zero
@@ -132,35 +161,22 @@ local function spawnCatch(run, spot)
 
 	TweenService:Create(catch, TweenInfo.new(1.2, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), { CFrame = spot.CFrame + Vector3.new(0, 1, 0) }):Play()
 
-	local caught = false
-	catch.Touched:Connect(function(hit)
-		if caught or run.ended or ownerOf(hit) ~= run.player then
+	local function collect()
+		if run.ended or not run.catches[catch] then
 			return
 		end
-		caught = true
+		run.catches[catch] = nil
 		table.insert(run.bag, creature.id)
 		run.player:SetAttribute("BagCount", #run.bag)
 		Remotes.DiveEvent:FireClient(run.player, "Caught", { name = creature.name, rarity = creature.rarity })
 		catch:Destroy()
+	end
+	run.catches[catch] = collect
+	catch.Touched:Connect(function(hit)
+		if ownerOf(hit) == run.player then
+			collect()
+		end
 	end)
-end
-
-local function gadgetChoices(run)
-	local pool = {}
-	for id in Config.Gadgets do
-		if id == "AirTank" or not run.gadgets[id] then
-			table.insert(pool, id)
-		end
-	end
-	local choices = {}
-	for i, id in shuffled(pool) do
-		if i > 3 then
-			break
-		end
-		local gadget = Config.Gadgets[id]
-		table.insert(choices, { id = id, name = gadget.name, desc = gadget.desc })
-	end
-	return choices
 end
 
 local function onExit(run)
@@ -177,16 +193,7 @@ local function onExit(run)
 		endDive(run.player, "zoneCleared")
 		return
 	end
-	local choices = Config.GADGET_PICK_FLOORS[run.cleared] and gadgetChoices(run) or {}
-	run.offered = {}
-	for _, choice in choices do
-		run.offered[choice.id] = true
-	end
-	Remotes.DiveEvent:FireClient(run.player, "FloorCleared", {
-		floor = run.cleared,
-		oxygenGain = Config.OXYGEN_PER_FLOOR,
-		choices = choices,
-	})
+	Remotes.DiveEvent:FireClient(run.player, "FloorCleared", { floor = run.cleared, oxygenGain = Config.OXYGEN_PER_FLOOR })
 end
 
 function buildFloor(run)
@@ -195,9 +202,11 @@ function buildFloor(run)
 	end
 	run.floorIndex += 1
 	run.awaitingChoice = false
+	run.catches = {}
 
 	local floor = run.order[(run.floorIndex - 1) % #run.order + 1]:Clone()
 	floor.Name = ("%s_Floor%d"):format(run.player.Name, run.floorIndex)
+	floor:SetAttribute("OwnerId", run.player.UserId)
 	floor:PivotTo(CFrame.new(run.origin))
 	floor.Parent = activeDives
 	run.floor = floor
@@ -254,15 +263,16 @@ function endDive(player, reason)
 		end
 	end
 
+	-- Kept catches go into your inventory; pearls come from selling them at the Dive Shop.
 	local data = PlayerData.get(player)
 	local pearls = reason == "zoneCleared" and Config.ZONE_CLEAR_BONUS or 0
 	local keptInfo = {}
 	for _, id in kept do
 		local creature = Config.getCreature(id)
-		pearls += Config.Rarities[creature.rarity].pearls
 		table.insert(keptInfo, { name = creature.name, rarity = creature.rarity })
 		if data then
 			data.catches[id] = (data.catches[id] or 0) + 1
+			data.discovered[id] = true
 		end
 	end
 	if data then
@@ -273,9 +283,9 @@ function endDive(player, reason)
 	end
 
 	player:SetAttribute("Diving", false)
-	player:SetAttribute("Gadgets", "")
 	player:SetAttribute("Floor", 0)
 	player:SetAttribute("BagCount", 0)
+	player:SetAttribute("HarpoonRange", 0)
 
 	local summary = {
 		reason = reason,
@@ -286,9 +296,9 @@ function endDive(player, reason)
 		pearls = pearls,
 	}
 	if reason ~= "left" then
-		local character = player.Character
-		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-		if humanoid and humanoid.Health > 0 then
+		local humanoid, character = humanoidOf(player)
+		if humanoid then
+			humanoid.WalkSpeed = Config.WALK_SPEED
 			character:PivotTo(harborSpawn.CFrame + Vector3.new(0, 4, 0))
 		end
 		Remotes.DiveEvent:FireClient(player, "DiveEnded", summary)
@@ -299,13 +309,9 @@ function endDive(player, reason)
 end
 
 function Dive.start(player)
-	if runs[player] then
-		return
-	end
-	local character = player.Character
-	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	local humanoid = humanoidOf(player)
 	local data = PlayerData.get(player)
-	if not (humanoid and humanoid.Health > 0 and data) then
+	if runs[player] or not (humanoid and data) then
 		return
 	end
 
@@ -315,32 +321,30 @@ function Dive.start(player)
 	end
 	slotsTaken[slot] = true
 
-	local wingBonus = 0
-	for _, wing in Config.Wings do
-		if data.wings[wing.id] then
-			wingBonus += wing.bonusOxygen
-		end
-	end
-
+	local stats = Stats.compute(data)
 	local run = {
 		player = player,
 		slot = slot,
 		origin = Config.DIVE_ORIGIN + Vector3.new((slot - 1) * Config.SLOT_SPACING, 0, 0),
-		order = shuffled(templates:GetChildren()),
+		order = floorOrder(),
+		stats = stats,
+		maxOxygen = Config.OXYGEN_MAX + stats.oxygen,
 		floorIndex = 0,
 		cleared = 0,
 		oxygen = 0,
 		bag = {},
-		gadgets = {},
+		catches = {}, -- [catch part] = collect function, for the current floor
 		lastHit = 0,
+		lastHarpoon = 0,
 		awaitingChoice = false,
 		ended = false,
 	}
 	runs[player] = run
-	player:SetAttribute("OxygenMax", Config.OXYGEN_MAX)
-	setOxygen(run, Config.OXYGEN_START + wingBonus)
+	humanoid.WalkSpeed = Config.SWIM_SPEED + stats.swimSpeed
+	player:SetAttribute("OxygenMax", run.maxOxygen)
+	player:SetAttribute("HarpoonRange", stats.harpoonRange)
+	setOxygen(run, Config.OXYGEN_START + stats.oxygen)
 	player:SetAttribute("BagCount", 0)
-	player:SetAttribute("Gadgets", "")
 	player:SetAttribute("Diving", true)
 	run.diedConnection = humanoid.Died:Connect(function()
 		endDive(player, "outOfAir")
@@ -353,30 +357,36 @@ Dive.stop = function(player, reason)
 	endDive(player, reason)
 end
 
-Remotes.DiveChoice.OnServerEvent:Connect(function(player, action, gadgetId)
+Remotes.DiveChoice.OnServerEvent:Connect(function(player, action)
 	local run = runs[player]
 	if not run or run.ended or not run.awaitingChoice then
 		return
 	end
-	if typeof(gadgetId) == "string" and run.offered and run.offered[gadgetId] then
-		if gadgetId == "AirTank" then
-			setOxygen(run, run.oxygen + Config.AIR_TANK_BONUS)
-		else
-			run.gadgets[gadgetId] = true
-		end
-		local owned = {}
-		for id in run.gadgets do
-			table.insert(owned, id)
-		end
-		player:SetAttribute("Gadgets", table.concat(owned, ","))
-		Remotes.DiveEvent:FireClient(player, "Notice", { text = "Got " .. Config.Gadgets[gadgetId].name .. "!" })
-	end
-	run.offered = nil
 	if action == "surface" then
 		endDive(player, "surfaced")
 	else
 		buildFloor(run)
 	end
+end)
+
+-- The client picks a target; the server checks it is this run's catch and within harpoon range.
+Remotes.Harpoon.OnServerEvent:Connect(function(player, target)
+	local run = runs[player]
+	local _, character = humanoidOf(player)
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	if not (run and root and typeof(target) == "Instance") then
+		return
+	end
+	local collect = run.catches[target]
+	local range = run.stats.harpoonRange
+	if not collect or range <= 0 or os.clock() - run.lastHarpoon < Config.HARPOON_COOLDOWN then
+		return
+	end
+	if (target.Position - root.Position).Magnitude > range + HARPOON_TOLERANCE then
+		return
+	end
+	run.lastHarpoon = os.clock()
+	collect()
 end)
 
 task.spawn(function()

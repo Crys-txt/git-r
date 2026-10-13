@@ -4,6 +4,7 @@ local Players = game:GetService("Players")
 local PlayerData = require(script.Parent.PlayerData)
 local Harbor = require(script.Parent.Harbor)
 local Dive = require(script.Parent.Dive)
+require(script.Parent.Shop) -- hooks up the shop remote
 
 local AUTOSAVE_SECONDS = 120
 local FEED_FROM_FLOOR = 3 -- floors below this are too common to announce

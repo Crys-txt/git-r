@@ -4,7 +4,7 @@ Exported from the [Claude Doc](https://claude.ai/code/artifact/5e00f392-8176-4c9
 
 ## Brief
 
-One game, three layers: short **obby runs** that are **randomized like a roguelite**, feeding a **tycoon-style home** you grow between runs. Roguelite, not roguelike: each run's layout and gadgets reset, but loot, home and unlocks are kept forever, so a death never sends you back to zero. The inspiration ([1+ Wings Obby Escape](https://www.roblox.com/games/73768006371986/1-Wings-Obby-Escape)) proves the run-and-upgrade loop works; this concept fixes its three gaps:
+One game, three layers: short **obby runs** that are **randomized like a roguelite**, feeding a **tycoon-style home** you grow between runs. Roguelite, not roguelike: each run's layout resets, but catches, equipment, home and unlocks are kept forever, so a death never sends you back to zero. The inspiration ([1+ Wings Obby Escape](https://www.roblox.com/games/73768006371986/1-Wings-Obby-Escape)) proves the run-and-upgrade loop works; this concept fixes its three gaps:
 
 | Gap | Fix in this concept |
 | --- | --- |
@@ -16,7 +16,7 @@ Design goal: the first 10 minutes feel fast and rewarding, the first hour feels 
 
 ## Theme: Deep Dive
 
-You ride a diving bell down an ocean trench, one floor at a time. Each floor is a short obby; an **oxygen meter** is the run's clock and tension. Surface with your catches, or run out of air and keep only part of them.
+You ride a diving bell down an ocean trench, one floor at a time. Each floor is an enclosed underwater cave you **swim** through (real Roblox water: you float upward, look down and swim to dive); an **oxygen meter** is the run's clock and tension. Surface with your catches, or run out of air and keep only part of them.
 
 | Depth zone | Floors | Look | Threats | Signature catches |
 | --- | --- | --- | --- | --- |
@@ -25,7 +25,7 @@ You ride a diving bell down an ocean trench, one floor at a time. Each floor is 
 | Twilight Zone | 26–50 | Dim blue, jellyfish fields, glowing plankton | Stinging jellies, patrolling sharks | Glow jellyfish, nautilus |
 | Midnight Trench | 51+ | Pitch dark, only your lamp and creature lights | Anglerfish lures, pressure cracks | Anglerfish, giant squid, abyss relics |
 
-**Gadgets** (pick 1 of 3 between floors): harpoon grapple, bubble double jump, sonar ping (shows the safe path), jet fins (dash), spare air tank.
+**Equipment** (bought at the Dive Shop with pearls from selling catches, kept forever, 3 tiers each): air tanks (more oxygen), fins (swim faster), harpoon (catch creatures from a distance with F). Later: lamp, sonar, scooter.
 
 **Home:** an aquarium whose wings unlock as you go deeper. **Currency:** pearls.
 
@@ -34,9 +34,9 @@ You ride a diving bell down an ocean trench, one floor at a time. Each floor is 
 A session is 3–5 minute runs chained by quick trips home, so there is always a natural "one more run".
 
 1. **Get ready at the harbor** – see rivals' aquariums and the live dive feed; pick a zone, join a race or go solo.
-2. **Dive floor by floor** – each floor is a mini obby, shuffled every dive; pick 1 of 3 gadgets between floors.
+2. **Dive floor by floor** – each floor is an underwater cave, shuffled every dive with easier caves first.
 3. **The dive ends** – surface: keep every catch. Out of air: keep part, never zero.
-4. **Upgrade your aquarium** – fill tanks and the collection book; new wings boost the next dive. Then back to 1, stronger, so you go deeper.
+4. **Sell, upgrade, display** – sell catches at the Dive Shop for pearls, buy better equipment, or keep rare fish in your aquarium (selling removes them). Then back to 1, stronger, so you go deeper.
 
 The run is the challenge; the home and lobby are where the grind becomes visible and where rivals see it.
 
@@ -46,10 +46,10 @@ Every hour played should leave a mark someone else can see. Four layers, from pr
 
 | Layer | What the player sees | What others see |
 | --- | --- | --- |
-| **Home (tycoon)** | Aquarium wings unlock in order: reef tank → shipwreck hall → jellyfish dome → twilight tunnel → abyss gallery. Each wing boosts dives (more oxygen, better gadget odds, passive pearls) | Aquariums line the shared harbor in the lobby; visitors walk through and "like" them |
+| **Home (tycoon)** | Aquarium wings unlock in order: reef tank → shipwreck hall → jellyfish dome → twilight tunnel → abyss gallery. Each wing boosts dives (more oxygen per dive) | Aquariums line the shared harbor in the lobby; visitors walk through and "like" them |
 | **Collection book** | Every creature and treasure has a page: silhouette until found, rarity stars, "found at floor X". Completing a page = permanent bonus | Rarest creatures get a spotlight tank at the aquarium entrance |
 | **Achievements & titles** | 3 tiers per achievement (bronze/silver/gold), e.g. "Clear the Sunlit Reef without a hit" | Equipped title floats above your head: *Shark Whisperer*, *Depth 50*, *No-Hit Reef* |
-| **Cosmetics** | Trails, gadget skins, diving bell skins earned from milestones, not only bought | Visible every run and in the lobby |
+| **Cosmetics** | Trails, equipment skins, diving bell skins earned from milestones, not only bought | Visible every run and in the lobby |
 
 Rule of thumb: each session should unlock at least one thing in one of these layers.
 
@@ -73,7 +73,7 @@ The first session decides everything: make the first win easy, the second win ea
 
 1. **0–1 min:** step into the diving bell at the dock; one-button tutorial floor; first catch (a clownfish) in 30 seconds.
 2. **1–3 min:** first real dive, 3 floors, almost impossible to fail. Surface and drop the fish in your tank: home "levels up" with a big effect.
-3. **3–6 min:** unlock the first gadget choice (pick 1 of 3). Second dive is 5 floors and introduces the oxygen meter and a patrolling shark.
+3. **3–6 min:** sell the first catches and buy a first piece of equipment (fins or a tank). Second dive is 5 floors and introduces the oxygen meter and a patrolling shark.
 4. **6–10 min:** first fail. Show what you kept (loot, XP) and what's next ("2 more pearls for the shipwreck hall"). Prompt a third run.
 
 **Smooth but challenging**
@@ -117,13 +117,13 @@ Odds are starting values to tune in playtests. Show them on every box: players t
 **Fair monetization:** sell convenience and style, never wins on the leaderboard.
 
 - Game passes: extra aquarium wing slot, 2x pearls, a VIP trail.
-- Cosmetics: gadget skins, diving bell skins, emotes.
+- Cosmetics: equipment skins, diving bell skins, emotes.
 - One emergency air tank per dive (Robux), disabled on the weekly seed leaderboard.
 
 **MVP scope (first playable)**
 
 - [ ] One zone (Sunlit Reef) with 8 floor templates and the oxygen meter, randomized order
-- [ ] 3 gadgets, pick 1 of 3 between floors
+- [ ] Dive Shop: sell catches, buy 3 equipment lines (tank, fins, harpoon)
 - [ ] Aquarium with 3 unlockable wings where catches swim
 - [ ] Collection book with 20 creatures and treasures
 - [ ] Harbor lobby showing every player's aquarium
@@ -138,9 +138,11 @@ Odds are starting values to tune in playtests. Show them on every box: players t
 
 ## Prototype defaults (decided 2026-10-14)
 
-- **Catching:** touch a creature to catch it; rarer ones sit on harder side paths.
+- **Catching:** touch a creature to catch it (or harpoon it); rarer ones sit in harder spots.
 - **Oxygen:** ~60 s of air, plus a few seconds back per floor cleared.
 - **Out of air:** keep 50% of catches, rarest first.
 - **Dives:** solo per player; lobby and harbor are shared.
-- **Floors:** one compact obby room per floor, 15–30 s to clear.
+- **Floors:** one enclosed underwater cave per floor, 15–40 s to clear, tagged Difficulty 1–3.
 - **Look:** grey-box with color-coded hazards; art later.
+- **Swimming:** real terrain water in caves and around the harbor; idle swimmers float up at about 5 studs/s, so spiked roofs and vertical shafts use buoyancy as a hazard.
+- **Economy:** catches are an inventory. Selling at the Dive Shop is the main pearl source (Common 2, Rare 6, Epic 15, Legendary 60); clearing the reef adds a 10-pearl bonus.

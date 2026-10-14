@@ -1,5 +1,5 @@
--- Client side of diving: the harpoon (F / Harpoon button catches the nearest creature in range and in sight)
--- and water currents that push you while you swim through a floor's "Current" zones.
+-- Client side of moving and diving: sprint swimming (Shift / Sprint button), the harpoon (F / Harpoon button
+-- catches the nearest creature in range and in sight) and trench currents that push you while you swim.
 local ContextActionService = game:GetService("ContextActionService")
 local Debris = game:GetService("Debris")
 local Players = game:GetService("Players")
@@ -10,15 +10,16 @@ local shared = ReplicatedStorage:WaitForChild("DeepDive")
 local Config = require(shared:WaitForChild("Config"))
 local Remotes = shared:WaitForChild("Remotes")
 local player = Players.LocalPlayer
-local activeDives = workspace:WaitForChild("ActiveDives")
+local trench = workspace:WaitForChild("Trench")
 
 local HARPOON_ACTION = "DeepDiveHarpoon"
+local SPRINT_ACTION = "DeepDiveSprint"
 
 local lastShot = 0
 
-local diveParams = OverlapParams.new()
-diveParams.FilterType = Enum.RaycastFilterType.Include
-diveParams.FilterDescendantsInstances = { activeDives }
+local trenchParams = OverlapParams.new()
+trenchParams.FilterType = Enum.RaycastFilterType.Include
+trenchParams.FilterDescendantsInstances = { trench }
 
 local function rootPart()
 	local character = player.Character
@@ -28,6 +29,20 @@ local function rootPart()
 	end
 end
 
+---------------------------------------------------------------- sprint
+-- The server applies the speed and drains oxygen faster by the same factor.
+local function sprint(_, inputState)
+	if inputState == Enum.UserInputState.Begin then
+		Remotes.Sprint:FireServer(true)
+	elseif inputState == Enum.UserInputState.End or inputState == Enum.UserInputState.Cancel then
+		Remotes.Sprint:FireServer(false)
+	end
+	return Enum.ContextActionResult.Pass
+end
+ContextActionService:BindAction(SPRINT_ACTION, sprint, true, Enum.KeyCode.LeftShift, Enum.KeyCode.ButtonL3)
+ContextActionService:SetTitle(SPRINT_ACTION, "Sprint")
+
+---------------------------------------------------------------- harpoon
 local function inSight(root, character, target)
 	local params = RaycastParams.new()
 	params.FilterType = Enum.RaycastFilterType.Exclude
@@ -38,9 +53,8 @@ end
 
 local function nearestCatch(root, character, range)
 	local best, bestDistance = nil, range
-	for _, part in workspace:GetPartBoundsInRadius(root.Position, range, diveParams) do
-		local floor = part:FindFirstAncestorOfClass("Model")
-		if part.Name == "Catch" and floor and floor:GetAttribute("OwnerId") == player.UserId then
+	for _, part in workspace:GetPartBoundsInRadius(root.Position, range, trenchParams) do
+		if part.Name == "Catch" then
 			local distance = (part.Position - root.Position).Magnitude
 			if distance < bestDistance and inSight(root, character, part) then
 				best, bestDistance = part, distance
@@ -90,6 +104,7 @@ local function refreshHarpoon()
 	end
 end
 
+---------------------------------------------------------------- currents
 local function insidePart(part, position)
 	local p = part.CFrame:PointToObjectSpace(position)
 	local half = part.Size / 2
@@ -97,7 +112,8 @@ local function insidePart(part, position)
 end
 
 -- Currents carry you along at their speed while you are inside the zone. This moves the character directly
--- because the swim controller overrides any velocity added to it every frame.
+-- because the swim controller overrides any velocity added to it every frame. A current's direction is in
+-- its chunk's own space, so rotated chunks still push the way they were built.
 RunService.Heartbeat:Connect(function(dt)
 	if not player:GetAttribute("Diving") then
 		return
@@ -106,10 +122,11 @@ RunService.Heartbeat:Connect(function(dt)
 	if not root then
 		return
 	end
-	for _, part in workspace:GetPartBoundsInRadius(root.Position, 1, diveParams) do
+	for _, part in workspace:GetPartBoundsInRadius(root.Position, 1, trenchParams) do
 		local current = part:GetAttribute("Current")
-		if current and insidePart(part, root.Position) then
-			root.CFrame += current * dt
+		local chunk = part:FindFirstAncestorOfClass("Model")
+		if current and chunk and insidePart(part, root.Position) then
+			root.CFrame += chunk:GetPivot():VectorToWorldSpace(current) * dt
 		end
 	end
 end)

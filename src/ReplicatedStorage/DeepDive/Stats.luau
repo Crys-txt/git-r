@@ -8,6 +8,7 @@ Stats.BASE = {
 	oxygen = 0, -- added to starting and maximum oxygen
 	swimSpeed = 0, -- added to Config.SWIM_SPEED
 	harpoonRange = 0, -- studs; 0 means no harpoon
+	lampRange = 24, -- studs lit around you in the dark
 }
 
 function Stats.compute(data)

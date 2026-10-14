@@ -16,7 +16,7 @@ Design goal: the first 10 minutes feel fast and rewarding, the first hour feels 
 
 ## Theme: Deep Dive
 
-You ride a diving bell down an ocean trench, one floor at a time. Each floor is an enclosed underwater cave you **swim** through (real Roblox water: you float upward, look down and swim to dive); an **oxygen meter** is the run's clock and tension. Surface with your catches, or run out of air and keep only part of them.
+The whole world is underwater. Players live in **glass air domes** on the seafloor (walkable, no oxygen needed) around an **endless trench**. Diving starts the moment you swim down into the trench and ends when you swim back out of its top; an **oxygen meter** drains only while diving. Surface with your catches, or black out and keep only part of them. **Sprinting** swims 1.6x faster and drains oxygen 1.6x faster, so oxygen per distance never changes.
 
 | Depth zone | Floors | Look | Threats | Signature catches |
 | --- | --- | --- | --- | --- |
@@ -25,7 +25,7 @@ You ride a diving bell down an ocean trench, one floor at a time. Each floor is 
 | Twilight Zone | 26–50 | Dim blue, jellyfish fields, glowing plankton | Stinging jellies, patrolling sharks | Glow jellyfish, nautilus |
 | Midnight Trench | 51+ | Pitch dark, only your lamp and creature lights | Anglerfish lures, pressure cracks | Anglerfish, giant squid, abyss relics |
 
-**Equipment** (bought at the Dive Shop with pearls from selling catches, kept forever, 3 tiers each): air tanks (more oxygen), fins (swim faster), harpoon (catch creatures from a distance with F). Later: lamp, sonar, scooter.
+**Equipment** (bought from Marina at the Dive Shop with pearls from selling catches, kept forever, 3 tiers each): air tanks (more oxygen), fins (swim faster), harpoon (catch from a distance with F), head lamp (light in the dark zones). Later: sonar, scooter.
 
 **Home:** an aquarium whose wings unlock as you go deeper. **Currency:** pearls.
 
@@ -33,10 +33,10 @@ You ride a diving bell down an ocean trench, one floor at a time. Each floor is 
 
 A session is 3–5 minute runs chained by quick trips home, so there is always a natural "one more run".
 
-1. **Get ready at the harbor** – see rivals' aquariums and the live dive feed; pick a zone, join a race or go solo.
-2. **Dive floor by floor** – each floor is an underwater cave, shuffled every dive with easier caves first.
-3. **The dive ends** – surface: keep every catch. Out of air: keep part, never zero.
-4. **Sell, upgrade, display** – sell catches at the Dive Shop for pearls, buy better equipment, or keep rare fish in your aquarium (selling removes them). Then back to 1, stronger, so you go deeper.
+1. **Get ready in the hub** – see rivals' domes and the live dive feed; sell catches and buy gear from Marina.
+2. **Dive the endless trench** – swim down through chunks built as you go; deeper zones are darker, harder and hold rarer creatures; grab air bubbles to stay down longer.
+3. **Swim back out** – leaving the top of the trench banks every catch plus 1 pearl per 10 m of depth. Black out instead: keep the rarest half.
+4. **Display, sell, upgrade** – the first of each species goes into your dome's tanks for good (never sold); spares are sold for pearls and better equipment. Then back to 2, stronger, so you go deeper.
 
 The run is the challenge; the home and lobby are where the grind becomes visible and where rivals see it.
 
@@ -57,12 +57,12 @@ Rule of thumb: each session should unlock at least one thing in one of these lay
 
 Players should feel others racing them even when playing solo.
 
-- **Shared harbor:** every player's aquarium docks along the pier; the biggest one sits at the front with a crown.
-- **Live run feed:** a lobby billboard shows "Alex just reached the Twilight Zone (floor 30)" in real time.
+- **Shared hub:** every player's dome sits around the trench with a sign showing their collection (x / 8 species).
+- **Live dive feed:** a board in the spawn dome shows "Alex reached the Twilight Zone (312 m)" and new discoveries in real time.
 - **Ghost racers:** during a run, faint ghosts of server players (or your own best run) move alongside you.
-- **Weekly seed:** one fixed floor order for everyone; global leaderboard by depth and time; top 100 get a unique title.
+- **Weekly seed:** one fixed trench layout for everyone (Config.TRENCH_SEED); global leaderboard by depth and time; top 100 get a unique title.
 - **Server race event:** every 30-60 minutes, everyone drops into the same short run; deepest diver wins a rare item/lootbox.
-- **Leaderboards:** deepest floor, fastest reef clear, home value, collection %. Show the player's own rank and the next name above them, not just the top 10.
+- **Leaderboards:** deepest dive (m), fastest reef clear, home value, collection %. Show the player's own rank and the next name above them, not just the top 10.
 - **Co-op revive:** in multiplayer runs, a friend can revive you once by reaching your spot; builds teamwork without needing parties.
 
 ## Early retention
@@ -136,13 +136,12 @@ Odds are starting values to tune in playtests. Show them on every box: players t
 - [ ] Grey-box 3 Sunlit Reef floors in Studio and test the run length (target 3–5 min)
 - [ ] Test the first 10 minutes with 3–5 players and note where they quit
 
-## Prototype defaults (decided 2026-10-14)
+## Prototype defaults (updated 2026-10-14)
 
-- **Catching:** touch a creature to catch it (or harpoon it); rarer ones sit in harder spots.
-- **Oxygen:** ~60 s of air, plus a few seconds back per floor cleared.
-- **Out of air:** keep 50% of catches, rarest first.
-- **Dives:** solo per player; lobby and harbor are shared.
-- **Floors:** one enclosed underwater cave per floor, 15–40 s to clear, tagged Difficulty 1–3.
-- **Look:** grey-box with color-coded hazards; art later.
-- **Swimming:** real terrain water in caves and around the harbor; idle swimmers float up at about 5 studs/s, so spiked roofs and vertical shafts use buoyancy as a hazard.
-- **Economy:** catches are an inventory. Selling at the Dive Shop is the main pearl source (Common 2, Rare 6, Epic 15, Legendary 60); clearing the reef adds a 10-pearl bonus.
+- **World:** everything is underwater. Domes are air pockets you walk in; outside you swim freely in the hub without using oxygen.
+- **Trench:** endless shaft in 80-stud chunks (9 templates, difficulty 1–3 by zone), shared by all players in a server; catches respawn 60 s after being taken.
+- **Oxygen:** 60 to start (+ tanks and dome wings), drains 1/s while diving; air bubbles +12; hazards −10 and a knock upward.
+- **Out of air:** screen darkens, blurs and a heartbeat plays below 30%; at 0 you black out, wake up in your dome and keep the rarest half.
+- **Collection:** the first catch of each species is displayed in your dome forever and can't be sold; later catches are sellable inventory.
+- **Economy:** selling is the main pearl source (Common 2, Rare 6, Epic 15, Legendary 60); surfacing adds 1 pearl per 10 m.
+- **Look:** terrain rock and sand, AI-generated meshes for all creatures, hazards, coral, kelp and the shop; an R15 shopkeeper NPC.

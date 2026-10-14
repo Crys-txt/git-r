@@ -1,9 +1,21 @@
--- Builds the Deep Dive grey-box world in Edit mode (run once through Studio's command bar or the MCP).
--- Safe to re-run: it rebuilds the Harbor and the floor templates it owns.
+-- Builds the Deep Dive world in Edit mode (run through Studio's command bar or the MCP). Safe to re-run:
+-- it clears the terrain and rebuilds the hub, the domes, the decorations and the trench chunk templates.
+-- Meshes are taken from ReplicatedStorage.DeepDive.Models when present (see tools/import_models.luau).
+local Lighting = game:GetService("Lighting")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 local ServerStorage = game:GetService("ServerStorage")
 local StarterPlayer = game:GetService("StarterPlayer")
+
+local terrain = workspace.Terrain
+local SAND = Color3.fromRGB(230, 210, 160)
+local GLASS = Color3.fromRGB(170, 220, 255)
+local METAL = Color3.fromRGB(120, 130, 145)
+local HUB_RADIUS = 120 -- domes sit on a circle this far from the trench
+local TRENCH_RADIUS = 22 -- must match Config.TRENCH_RADIUS
+local TRENCH_TOP_Y = -16 -- must match Config.TRENCH_TOP_Y
+local SEA_SIZE = 640
+local SEA_DEPTH = 140 -- water from the seafloor (y = 0) up to here
 
 local function part(parent, name, size, at, color, material, props)
 	local p = Instance.new("Part")
@@ -35,30 +47,36 @@ local function folder(parent, name)
 	return f
 end
 
-local function textGui(parent, text, size, face)
-	local gui
-	if face then
-		gui = Instance.new("SurfaceGui")
-		gui.Face = face
-		gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
-		gui.PixelsPerStud = 40
-	else
-		gui = Instance.new("BillboardGui")
-		gui.Size = UDim2.fromOffset(220, 50)
-		gui.StudsOffset = Vector3.new(0, size, 0)
-		gui.MaxDistance = 120
-	end
+local function billboard(parent, text, offset, size)
+	local gui = Instance.new("BillboardGui")
+	gui.Size = size or UDim2.fromOffset(240, 60)
+	gui.StudsOffset = Vector3.new(0, offset, 0)
+	gui.MaxDistance = 250
 	local label = Instance.new("TextLabel")
 	label.Size = UDim2.fromScale(1, 1)
 	label.BackgroundTransparency = 1
 	label.Font = Enum.Font.GothamBold
 	label.TextScaled = true
 	label.TextColor3 = Color3.new(1, 1, 1)
-	label.TextStrokeTransparency = 0.4
+	label.TextStrokeTransparency = 0.3
 	label.Text = text
 	label.Parent = gui
 	gui.Parent = parent
 	return label
+end
+
+local models = folder(folder(ReplicatedStorage, "DeepDive"), "Models")
+local function mesh(name, parent, cframe, largestSide)
+	local source = models:FindFirstChild(name)
+	if not (source and source:IsA("BasePart")) then
+		return nil
+	end
+	local copy = source:Clone()
+	copy.Size *= largestSide / math.max(copy.Size.X, copy.Size.Y, copy.Size.Z)
+	copy.CFrame = cframe
+	copy.Anchored = true
+	copy.Parent = parent
+	return copy
 end
 
 -- 0. Move the old obby out of the way (kept in ServerStorage so it can be restored).
@@ -85,7 +103,7 @@ end
 -- 1. Containers and remotes.
 local shared = folder(ReplicatedStorage, "DeepDive")
 local remotes = folder(shared, "Remotes")
-local REMOTES = { DiveEvent = "RemoteEvent", DiveChoice = "RemoteEvent", Harpoon = "RemoteEvent", ShopRequest = "RemoteFunction" }
+local REMOTES = { DiveEvent = "RemoteEvent", Harpoon = "RemoteEvent", Sprint = "RemoteEvent", ShopRequest = "RemoteFunction" }
 for name, className in REMOTES do
 	if not remotes:FindFirstChild(name) then
 		local remote = Instance.new(className)
@@ -95,352 +113,442 @@ for name, className in REMOTES do
 end
 folder(ServerScriptService, "DeepDive")
 local serverAssets = folder(ServerStorage, "DeepDive")
-if serverAssets:FindFirstChild("FloorTemplates") then
-	serverAssets.FloorTemplates:Destroy()
+for _, old in { "FloorTemplates", "ChunkTemplates" } do
+	if serverAssets:FindFirstChild(old) then
+		serverAssets[old]:Destroy()
+	end
 end
-local templates = folder(serverAssets, "FloorTemplates")
+local templates = folder(serverAssets, "ChunkTemplates")
+workspace.FallenPartsDestroyHeight = -50000 -- the trench is (practically) endless
 
--- 2. Harbor lobby: pier, spawn, diving bell, live feed board and six aquarium plots.
+-- 2. The ocean: a sandy seafloor at y = 0 under deep water, with the trench opening in the middle.
+terrain:Clear()
+terrain.WaterColor = Color3.fromRGB(20, 110, 160)
+terrain.WaterTransparency = 0.3 -- murky enough that the domes feel deep underwater
+terrain.WaterWaveSize = 0.1
+terrain.WaterReflectance = 0.2
+terrain:SetMaterialColor(Enum.Material.Sand, Color3.fromRGB(176, 160, 118))
+terrain:SetMaterialColor(Enum.Material.Rock, Color3.fromRGB(82, 88, 98))
+terrain:SetMaterialColor(Enum.Material.Basalt, Color3.fromRGB(45, 45, 55))
+terrain:FillBlock(CFrame.new(0, -8, 0), Vector3.new(SEA_SIZE, 16, SEA_SIZE), Enum.Material.Sand)
+terrain:FillBlock(CFrame.new(0, SEA_DEPTH / 2, 0), Vector3.new(SEA_SIZE, SEA_DEPTH, SEA_SIZE), Enum.Material.Water)
+-- Trench mouth: a rocky rim and an opening down to where the runtime chunks begin.
+terrain:FillCylinder(CFrame.new(0, 1, 0), 6, TRENCH_RADIUS + 10, Enum.Material.Rock)
+terrain:FillCylinder(CFrame.new(0, TRENCH_TOP_Y / 2, 0), -TRENCH_TOP_Y + 12, TRENCH_RADIUS + 12, Enum.Material.Rock)
+-- Water only fills empty space, so carve the opening to air first.
+terrain:FillCylinder(CFrame.new(0, TRENCH_TOP_Y / 2 + 2, 0), -TRENCH_TOP_Y + 12, TRENCH_RADIUS, Enum.Material.Air)
+terrain:FillCylinder(CFrame.new(0, TRENCH_TOP_Y / 2 + 2, 0), -TRENCH_TOP_Y + 12, TRENCH_RADIUS, Enum.Material.Water)
+
+Lighting.Ambient = Color3.fromRGB(70, 90, 110)
+Lighting.OutdoorAmbient = Color3.fromRGB(110, 150, 180)
+Lighting.Brightness = 2.5
+
+-- 3. The hub: glass domes full of air on the seafloor, around the trench.
 if workspace:FindFirstChild("Harbor") then
 	workspace.Harbor:Destroy()
 end
 local harbor = Instance.new("Model")
 harbor.Name = "Harbor"
-local SAND = Color3.fromRGB(230, 210, 160)
 
--- Real swimmable sea around the pier (terrain water over a sand floor).
-local terrain = workspace.Terrain
-terrain.WaterColor = Color3.fromRGB(20, 120, 170)
-terrain.WaterTransparency = 0.6
-terrain.WaterWaveSize = 0.1
-terrain:FillBlock(CFrame.new(0, -12.5, 0), Vector3.new(600, 24, 600), Enum.Material.Water)
-terrain:FillBlock(CFrame.new(0, -26.5, 0), Vector3.new(600, 4, 600), Enum.Material.Sand)
-part(harbor, "Pier", Vector3.new(40, 1, 170), Vector3.new(0, 0, 0), Color3.fromRGB(150, 110, 70), Enum.Material.WoodPlanks)
-
-local spawn = Instance.new("SpawnLocation")
-spawn.Name = "HarborSpawn"
-spawn.Size = Vector3.new(10, 1, 10)
-spawn.CFrame = CFrame.new(0, 1, -70) * CFrame.Angles(0, math.pi, 0)
-spawn.Anchored = true
-spawn.Neutral = true
-spawn.Duration = 0
-spawn.Color = Color3.fromRGB(80, 200, 255)
-spawn.Parent = harbor
-
-local bell = Instance.new("Model")
-bell.Name = "DivingBell"
-part(bell, "Base", Vector3.new(14, 1, 14), Vector3.new(0, 1, 72), Color3.fromRGB(90, 90, 100), Enum.Material.DiamondPlate)
-local dome = part(bell, "Dome", Vector3.new(10, 10, 10), Vector3.new(0, 6.5, 72), Color3.fromRGB(205, 160, 60), Enum.Material.Metal, { Shape = Enum.PartType.Ball })
-part(bell, "Window", Vector3.new(4, 4, 1), Vector3.new(0, 7, 66.6), Color3.fromRGB(120, 220, 255), Enum.Material.Neon)
-textGui(dome, "DIVE", 8)
-local prompt = Instance.new("ProximityPrompt")
-prompt.ActionText = "Start dive"
-prompt.ObjectText = "Diving Bell"
-prompt.HoldDuration = 0
-prompt.MaxActivationDistance = 14
-prompt.RequiresLineOfSight = false
-prompt.Parent = dome
-bell.Parent = harbor
-
-local board = part(harbor, "DiveFeed", Vector3.new(22, 9, 1), Vector3.new(0, 11, -40), Color3.fromRGB(20, 35, 50), Enum.Material.SmoothPlastic, { CanCollide = false })
-local feedGui = Instance.new("SurfaceGui")
-feedGui.Face = Enum.NormalId.Front
-feedGui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
-feedGui.PixelsPerStud = 40
-local feedTitle = Instance.new("TextLabel")
-feedTitle.Name = "Title"
-feedTitle.Size = UDim2.new(1, 0, 0.2, 0)
-feedTitle.BackgroundTransparency = 1
-feedTitle.Font = Enum.Font.GothamBlack
-feedTitle.TextScaled = true
-feedTitle.TextColor3 = Color3.fromRGB(120, 220, 255)
-feedTitle.Text = "LIVE DIVE FEED"
-feedTitle.Parent = feedGui
-local feedLabel = Instance.new("TextLabel")
-feedLabel.Name = "FeedLabel"
-feedLabel.Position = UDim2.fromScale(0.04, 0.22)
-feedLabel.Size = UDim2.fromScale(0.92, 0.75)
-feedLabel.BackgroundTransparency = 1
-feedLabel.Font = Enum.Font.GothamMedium
-feedLabel.TextSize = 30
-feedLabel.TextWrapped = true
-feedLabel.TextXAlignment = Enum.TextXAlignment.Left
-feedLabel.TextYAlignment = Enum.TextYAlignment.Top
-feedLabel.TextColor3 = Color3.new(1, 1, 1)
-feedLabel.Text = ""
-feedLabel.Parent = feedGui
-feedGui.Parent = board
-for _, x in { -10, 10 } do
-	part(harbor, "Pole", Vector3.new(1, 11, 1), Vector3.new(x, 5.5, -39), Color3.fromRGB(150, 110, 70), Enum.Material.Wood)
+local function slot(index)
+	local angle = math.rad(index * 45)
+	local center = Vector3.new(math.sin(angle) * HUB_RADIUS, 0, -math.cos(angle) * HUB_RADIUS)
+	-- Each dome faces the trench: local -Z points at the centre of the hub.
+	return CFrame.lookAt(center, Vector3.new(0, 0, 0))
 end
 
--- Dive Shop stall next to the spawn: sell catches, buy equipment.
-local shop = Instance.new("Model")
-shop.Name = "DiveShop"
-local counter = part(shop, "Counter", Vector3.new(9, 3, 3), Vector3.new(13, 2, -57), Color3.fromRGB(120, 85, 55), Enum.Material.WoodPlanks)
-for _, offset in { Vector3.new(-4.5, 0, -6), Vector3.new(4.5, 0, -6), Vector3.new(-4.5, 0, 1), Vector3.new(4.5, 0, 1) } do
-	part(shop, "Post", Vector3.new(0.8, 8, 0.8), Vector3.new(13, 4.5, -57) + offset, Color3.fromRGB(150, 110, 70), Enum.Material.Wood)
+local function dome(name, frame, radius)
+	local model = Instance.new("Model")
+	model.Name = name
+	-- Air inside: carve the water out, then put the sand back under the floor.
+	terrain:FillBall(frame.Position, radius - 0.5, Enum.Material.Air)
+	-- Stop 2 studs under the floor so the sand never pokes through it.
+	terrain:FillBlock(frame * CFrame.new(0, -9, 0), Vector3.new(radius * 2 + 4, 14, radius * 2 + 4), Enum.Material.Sand)
+	part(model, "Glass", Vector3.new(radius * 2, radius * 2, radius * 2), frame, GLASS, Enum.Material.Glass, {
+		Shape = Enum.PartType.Ball,
+		Transparency = 0.82,
+		CanCollide = false,
+		CanQuery = false,
+		CanTouch = false,
+		CastShadow = false,
+	})
+	part(model, "Floor", Vector3.new(1, radius * 2 - 1, radius * 2 - 1), frame * CFrame.new(0, 0.5, 0) * CFrame.Angles(0, 0, math.rad(90)), METAL, Enum.Material.DiamondPlate, { Shape = Enum.PartType.Cylinder })
+	part(model, "Rug", Vector3.new(0.2, radius, radius), frame * CFrame.new(0, 1.05, 0) * CFrame.Angles(0, 0, math.rad(90)), Color3.fromRGB(40, 90, 130), Enum.Material.Fabric, { Shape = Enum.PartType.Cylinder, CanCollide = false })
+	local lampPart = part(model, "Lamp", Vector3.new(2, 1, 2), frame * CFrame.new(0, radius - 2, 0), Color3.fromRGB(255, 240, 200), Enum.Material.Neon, { CanCollide = false, Shape = Enum.PartType.Ball })
+	local light = Instance.new("PointLight")
+	light.Range = radius * 1.8
+	light.Brightness = 1.2
+	light.Color = Color3.fromRGB(255, 240, 210)
+	light.Parent = lampPart
+	model.Parent = harbor
+	return model
 end
-part(shop, "Roof", Vector3.new(11, 0.6, 9), Vector3.new(13, 8.8, -59.5), Color3.fromRGB(230, 90, 70), Enum.Material.Fabric)
-textGui(counter, "DIVE SHOP", 7)
-local shopPrompt = Instance.new("ProximityPrompt")
-shopPrompt.ActionText = "Open shop"
-shopPrompt.ObjectText = "Dive Shop"
-shopPrompt.HoldDuration = 0
-shopPrompt.MaxActivationDistance = 10
-shopPrompt.RequiresLineOfSight = false
-shopPrompt.Parent = counter
-shop.Parent = harbor
 
--- Wing ids must match Config.Wings.
-local WING_IDS = { "ReefTank", "ShipwreckHall", "JellyfishDome" }
-local WING_NAMES = { "Reef Tank", "Shipwreck Hall", "Jellyfish Dome" }
-local plots = Instance.new("Folder")
-plots.Name = "Plots"
-plots.Parent = harbor
-for i, spot in { { -33, -40 }, { 33, -40 }, { -33, 5 }, { 33, 5 }, { -33, 50 }, { 33, 50 } } do
-	local x, z = spot[1], spot[2]
-	local side = x > 0 and 1 or -1
-	local plot = Instance.new("Model")
-	plot.Name = ("Plot%d"):format(i)
-	part(plot, "Base", Vector3.new(26, 1, 36), Vector3.new(x, 0, z), SAND, Enum.Material.Sand)
-	local signPosition = Vector3.new(x - side * 12, 4, z)
-	local sign = part(plot, "Sign", Vector3.new(14, 3, 0.5), CFrame.lookAt(signPosition, signPosition - Vector3.new(side, 0, 0)), Color3.fromRGB(40, 60, 80), Enum.Material.SmoothPlastic, { CanCollide = false })
-	textGui(sign, "Free plot", 0, Enum.NormalId.Front)
-	local tanks = Instance.new("Folder")
-	tanks.Name = "Tanks"
-	tanks.Parent = plot
-	for w, wingId in WING_IDS do
-		local tank = part(tanks, wingId, Vector3.new(14, 7, 9), Vector3.new(x + side * 3, 4, z + (w - 2) * 12), Color3.fromRGB(120, 130, 140), Enum.Material.Glass, { Transparency = 0.85 })
-		textGui(tank, WING_NAMES[w], 5)
-	end
-	local fish = Instance.new("Folder")
-	fish.Name = "Fish"
-	fish.Parent = plot
-	plot.Parent = plots
+-- Spawn dome with the live dive feed.
+do
+	local frame = slot(0)
+	local spawnDome = dome("SpawnDome", frame, 24)
+	local spawn = Instance.new("SpawnLocation")
+	spawn.Name = "HarborSpawn"
+	spawn.Size = Vector3.new(8, 1, 8)
+	spawn.CFrame = frame * CFrame.new(0, 1.5, 4)
+	spawn.Anchored = true
+	spawn.Neutral = true
+	spawn.Duration = 0
+	spawn.Color = Color3.fromRGB(80, 200, 255)
+	spawn.Material = Enum.Material.Neon
+	spawn.Transparency = 0.3
+	spawn.Parent = spawnDome
+	local board = part(spawnDome, "DiveFeed", Vector3.new(20, 9, 1), frame * CFrame.new(0, 8, 14), Color3.fromRGB(20, 35, 50), Enum.Material.SmoothPlastic)
+	local feedGui = Instance.new("SurfaceGui")
+	feedGui.Face = Enum.NormalId.Front
+	feedGui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+	feedGui.PixelsPerStud = 40
+	local title = Instance.new("TextLabel")
+	title.Name = "Title"
+	title.Size = UDim2.new(1, 0, 0.2, 0)
+	title.BackgroundTransparency = 1
+	title.Font = Enum.Font.GothamBlack
+	title.TextScaled = true
+	title.TextColor3 = Color3.fromRGB(120, 220, 255)
+	title.Text = "LIVE DIVE FEED"
+	title.Parent = feedGui
+	local feedLabel = Instance.new("TextLabel")
+	feedLabel.Name = "FeedLabel"
+	feedLabel.Position = UDim2.fromScale(0.04, 0.22)
+	feedLabel.Size = UDim2.fromScale(0.92, 0.75)
+	feedLabel.BackgroundTransparency = 1
+	feedLabel.Font = Enum.Font.GothamMedium
+	feedLabel.TextSize = 28
+	feedLabel.TextWrapped = true
+	feedLabel.TextXAlignment = Enum.TextXAlignment.Left
+	feedLabel.TextYAlignment = Enum.TextYAlignment.Top
+	feedLabel.TextColor3 = Color3.new(1, 1, 1)
+	feedLabel.Text = ""
+	feedLabel.Parent = feedGui
+	feedGui.Parent = board
+	billboard(part(spawnDome, "SignAnchor", Vector3.new(1, 1, 1), frame * CFrame.new(0, 27, 0), Color3.new(), nil, { Transparency = 1, CanCollide = false, CanQuery = false, CanTouch = false }), "HUB\nWalk out and swim to the trench to dive", 0)
 end
-harbor.Parent = workspace
 
--- 3. Sunlit Reef floor templates: enclosed underwater caves you swim through.
--- Each cave has a Start pad (the model's pivot), an Exit gate, a "Water" volume the server fills with
--- terrain water when the floor is built, and CatchSpot parts (attribute Hard = rare-only).
--- Mechanics come from attributes: Hazard, MoveOffset/MoveTime/MovePhase, SpinSpeed/SpinAxis, Current, Crumble.
--- Difficulty (1-3) on the cave model orders floors in a dive: random within a difficulty, easy ones first.
-local ROCK = Color3.fromRGB(75, 85, 100)
-local HAZARD = Color3.fromRGB(150, 20, 60)
+-- Shop dome: a counter with the shopkeeper NPC (created at runtime by Harbor.luau) behind it.
+do
+	local frame = slot(1)
+	local shopDome = dome("ShopDome", frame, 22)
+	local counterFrame = frame * CFrame.new(0, 2.5, 3)
+	local counter = part(shopDome, "Counter", Vector3.new(12, 3, 3), counterFrame, Color3.fromRGB(120, 85, 55), Enum.Material.WoodPlanks)
+	local counterMesh = mesh("ShopCounter", shopDome, counterFrame * CFrame.new(0, 0.2, 0), 9)
+	if counterMesh then
+		counterMesh.CanCollide = false
+		counter.Transparency = 1 -- keep the box as the solid, invisible collider
+	end
+	part(shopDome, "ShopkeeperSpot", Vector3.new(2, 0.2, 2), frame * CFrame.new(0, 1.1, 7), Color3.new(), nil, { Transparency = 1, CanCollide = false, CanQuery = false, CanTouch = false })
+	billboard(part(shopDome, "SignAnchor", Vector3.new(1, 1, 1), frame * CFrame.new(0, 25, 0), Color3.new(), nil, { Transparency = 1, CanCollide = false, CanQuery = false, CanTouch = false }), "DIVE SHOP\nSell catches · Buy gear", 0)
+end
 
-local function newCave(name, opts)
-	local W, H, L = opts.width or 40, opts.height or 24, opts.length
-	local y0 = opts.bottom or -2
-	local y1 = y0 + H
-	local z0, z1 = -8, L + 8
-	local cz, len, T = (z0 + z1) / 2, z1 - z0, 4
-	local m = Instance.new("Model")
-	m.Name = name
-	m:SetAttribute("Difficulty", opts.difficulty or 1)
-	m.PrimaryPart = part(m, "Start", Vector3.new(8, 1, 8), opts.start or Vector3.new(0, y0 + 0.5, 0), Color3.fromRGB(80, 200, 255), Enum.Material.Neon, { Transparency = 0.4 })
-	part(m, "Bed", Vector3.new(W + 2 * T, T, len + 2 * T), Vector3.new(0, y0 - T / 2, cz), SAND, Enum.Material.Sand)
-	-- Opaque on purpose: the camera passes through see-through parts and would end up outside the cave.
-	part(m, "Ceiling", Vector3.new(W + 2 * T, T, len + 2 * T), Vector3.new(0, y1 + T / 2, cz), Color3.fromRGB(45, 60, 80), Enum.Material.Rock)
-	for _, side in { -1, 1 } do
-		part(m, "Wall", Vector3.new(T, H, len), Vector3.new(side * (W / 2 + T / 2), (y0 + y1) / 2, cz), ROCK, Enum.Material.Rock)
+-- Six player domes, each with three display tanks (ids must match Config.Wings).
+local WINGS = { { "ReefTank", "Reef Tank" }, { "ShipwreckHall", "Shipwreck Hall" }, { "JellyfishDome", "Jellyfish Dome" } }
+local domes = Instance.new("Folder")
+domes.Name = "Domes"
+domes.Parent = harbor
+for i = 1, 6 do
+	local frame = slot(i + 1)
+	local playerDome = dome(("Dome%d"):format(i), frame, 24)
+	playerDome.Parent = domes
+	part(playerDome, "HomeSpot", Vector3.new(2, 0.2, 2), frame * CFrame.new(0, 1.1, 0), Color3.new(), nil, { Transparency = 1, CanCollide = false, CanQuery = false, CanTouch = false })
+	local sign = part(playerDome, "Sign", Vector3.new(1, 1, 1), frame * CFrame.new(0, 28, 0), Color3.new(), nil, { Transparency = 1, CanCollide = false, CanQuery = false, CanTouch = false })
+	billboard(sign, "Free dome", 0, UDim2.fromOffset(260, 80))
+	local tanks = folder(playerDome, "Tanks")
+	for w, wing in WINGS do
+		local x = (w - 2) * 12
+		local tank = part(tanks, wing[1], Vector3.new(10, 7, 6), frame * CFrame.new(x, 4.5, 10 + math.abs(x) * -0.2) * CFrame.Angles(0, math.rad(-x * 1.5), 0), Color3.fromRGB(120, 130, 140), Enum.Material.Glass, { Transparency = 0.85 })
+		part(playerDome, wing[1] .. "Base", Vector3.new(10.4, 1, 6.4), tank.CFrame * CFrame.new(0, -4, 0), METAL, Enum.Material.Metal, { CanQuery = false })
+		billboard(tank, wing[2], 5.5, UDim2.fromOffset(200, 40))
 	end
-	for _, z in { z0 - T / 2, z1 + T / 2 } do
-		part(m, "Wall", Vector3.new(W, H, T), Vector3.new(0, (y0 + y1) / 2, z), ROCK, Enum.Material.Rock)
+	folder(playerDome, "Fish")
+end
+
+-- The trench mouth: a ring of lights and a sign.
+do
+	local rim = Instance.new("Model")
+	rim.Name = "TrenchRim"
+	for i = 0, 11 do
+		local angle = math.rad(i * 30)
+		local position = Vector3.new(math.cos(angle) * (TRENCH_RADIUS + 15), 1.5, math.sin(angle) * (TRENCH_RADIUS + 15))
+		local post = part(rim, "Light", Vector3.new(1, 3, 1), position, Color3.fromRGB(120, 255, 220), Enum.Material.Neon, { CanCollide = false })
+		local light = Instance.new("PointLight")
+		light.Range = 14
+		light.Color = post.Color
+		light.Parent = post
 	end
-	part(m, "Water", Vector3.new(W, H, len), Vector3.new(0, (y0 + y1) / 2, cz), Color3.new(1, 1, 1), nil, { Transparency = 1, CanCollide = false, CanQuery = false, CanTouch = false })
-	local exit = part(m, "Exit", Vector3.new(10, 10, 1), opts.exit or Vector3.new(0, y0 + 6, L), Color3.fromRGB(120, 255, 220), Enum.Material.Neon, { Transparency = 0.4, CanCollide = false })
-	local exitLight = Instance.new("PointLight")
-	exitLight.Range = 30
-	exitLight.Brightness = 2
-	exitLight.Color = exit.Color
-	exitLight.Parent = exit
-	-- Glowing coral along the walls so the cave stays readable.
-	for z = 8, L, 20 do
-		for _, side in { -1, 1 } do
-			local glow = part(m, "Glow", Vector3.new(1.5, 1.5, 1.5), Vector3.new(side * (W / 2 - 1), y0 + H * 0.6, z), Color3.fromRGB(255, 150, 200), Enum.Material.Neon, { CanCollide = false, CanQuery = false, CanTouch = false })
-			local light = Instance.new("PointLight")
-			light.Range = 22
-			light.Brightness = 1.2
-			light.Color = glow.Color
-			light.Parent = glow
+	billboard(part(rim, "SignAnchor", Vector3.new(1, 1, 1), Vector3.new(0, 16, 0), Color3.new(), nil, { Transparency = 1, CanCollide = false, CanQuery = false, CanTouch = false }), "THE TRENCH\nSwim down to dive · Swim up to bank your catches", 0, UDim2.fromOffset(420, 80))
+	rim.Parent = harbor
+end
+
+-- Decorations: coral, kelp and rocks scattered over the seafloor, away from the domes and the trench.
+do
+	local decor = Instance.new("Folder")
+	decor.Name = "Decor"
+	decor.Parent = harbor
+	local rng = Random.new(42)
+	local placed = 0
+	while placed < 70 do
+		local angle, distance = rng:NextNumber(0, math.pi * 2), rng:NextNumber(TRENCH_RADIUS + 16, 280)
+		local position = Vector3.new(math.cos(angle) * distance, 0, math.sin(angle) * distance)
+		local clear = true
+		for s = 0, 7 do
+			if (position - slot(s).Position).Magnitude < 30 then
+				clear = false
+			end
 		end
-	end
-	m.Parent = templates
-	return m, { W = W, y0 = y0, y1 = y1, z0 = z0, z1 = z1 }
-end
-
-local function rock(m, x0, x1, y0, y1, z0, z1)
-	if x1 - x0 > 0.1 and y1 - y0 > 0.1 and z1 - z0 > 0.1 then
-		part(m, "Rock", Vector3.new(x1 - x0, y1 - y0, z1 - z0), Vector3.new((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2), ROCK, Enum.Material.Rock)
-	end
-end
-
--- A rock wall across the cave at z with one opening (centre hx, hy; size hw x hh).
-local function wallWithHole(m, d, z, hx, hy, hw, hh)
-	local za, zb = z - 1.5, z + 1.5
-	local xa, xb, ya, yb = hx - hw / 2, hx + hw / 2, hy - hh / 2, hy + hh / 2
-	rock(m, -d.W / 2, xa, d.y0, d.y1, za, zb)
-	rock(m, xb, d.W / 2, d.y0, d.y1, za, zb)
-	rock(m, xa, xb, d.y0, ya, za, zb)
-	rock(m, xa, xb, yb, d.y1, za, zb)
-end
-
--- A rock shelf across a vertical shaft at height y with one opening (centre hx, hz; size hw x hd).
-local function shelfWithHole(m, d, y, hx, hz, hw, hd)
-	local ya, yb = y - 1.5, y + 1.5
-	local xa, xb, za, zb = hx - hw / 2, hx + hw / 2, hz - hd / 2, hz + hd / 2
-	rock(m, -d.W / 2, xa, ya, yb, d.z0, d.z1)
-	rock(m, xb, d.W / 2, ya, yb, d.z0, d.z1)
-	rock(m, xa, xb, ya, yb, d.z0, za)
-	rock(m, xa, xb, ya, yb, zb, d.z1)
-end
-
-local function hazardBall(m, name, size, pos, color, material, attributes)
-	attributes = attributes or {}
-	attributes.Hazard = true
-	return part(m, name, Vector3.new(size, size, size), pos, color, material, { Shape = Enum.PartType.Ball, Attributes = attributes })
-end
-
-local function urchin(m, pos, attributes)
-	return hazardBall(m, "Urchin", 4, pos, HAZARD, Enum.Material.Slate, attributes)
-end
-
-local function hazardBar(m, name, size, at, attributes)
-	attributes = attributes or {}
-	attributes.Hazard = true
-	return part(m, name, size, at, HAZARD, Enum.Material.Slate, { Attributes = attributes })
-end
-
-local function catchSpot(m, pos, hard)
-	part(m, "CatchSpot", Vector3.new(1, 1, 1), pos, Color3.new(1, 1, 1), nil, { Transparency = 1, CanCollide = false, CanTouch = false, CanQuery = false, Attributes = { Hard = hard } })
-end
-
-do -- 1. Coral Maze: walls with one opening each, alternating side and height
-	local m, d = newCave("CoralMaze", { length = 90, difficulty = 1 })
-	wallWithHole(m, d, 18, -12, 3, 10, 9)
-	wallWithHole(m, d, 36, 12, 15, 10, 9)
-	wallWithHole(m, d, 54, -12, 15, 10, 9)
-	wallWithHole(m, d, 72, 12, 3, 10, 9)
-	urchin(m, Vector3.new(12, 2, 42))
-	urchin(m, Vector3.new(12, 2, 48))
-	catchSpot(m, Vector3.new(-12, 4, 27), false)
-	catchSpot(m, Vector3.new(12, 15, 63), false)
-	catchSpot(m, Vector3.new(16, 1, 45), true)
-end
-
-do -- 2. Urchin Garden: drift between floating urchins, three of them patrol
-	local m = newCave("UrchinGarden", { length = 80, difficulty = 2 })
-	for _, p in { { -12, 4, 14 }, { 4, 12, 14 }, { 14, 18, 18 }, { -4, 18, 24 }, { 10, 4, 26 }, { -14, 10, 30 }, { 2, 6, 36 }, { 14, 12, 38 }, { -8, 16, 42 }, { 6, 18, 48 }, { -14, 4, 50 }, { 0, 10, 54 }, { 12, 4, 58 }, { -6, 6, 64 }, { 8, 14, 66 } } do
-		urchin(m, Vector3.new(p[1], p[2], p[3]))
-	end
-	urchin(m, Vector3.new(-16, 8, 20), { MoveOffset = Vector3.new(32, 0, 0), MoveTime = 3 })
-	urchin(m, Vector3.new(0, 0, 45), { MoveOffset = Vector3.new(0, 18, 0), MoveTime = 2 })
-	urchin(m, Vector3.new(16, 10, 60), { MoveOffset = Vector3.new(-32, 0, 0), MoveTime = 2.5 })
-	-- The rare catch sits in a ring of urchins; reach it from the front or back.
-	for _, o in { { -5, 0 }, { 5, 0 }, { 0, -5 }, { 0, 5 } } do
-		urchin(m, Vector3.new(-12 + o[1], 15 + o[2], 72))
-	end
-	catchSpot(m, Vector3.new(0, 14, 30), false)
-	catchSpot(m, Vector3.new(6, 6, 62), false)
-	catchSpot(m, Vector3.new(-12, 15, 72), true)
-end
-
-do -- 3. Kelp Forest: weave between kelp stalks while two eels patrol
-	local m, d = newCave("KelpForest", { length = 90, difficulty = 1 })
-	local rng = Random.new(7)
-	for z = 12, 78, 8 do
-		for x = -16, 16, 8 do
-			if rng:NextNumber() > 0.3 then
-				part(m, "Kelp", Vector3.new(2.5, d.y1 - d.y0, 2.5), Vector3.new(x + rng:NextNumber(-2, 2), (d.y0 + d.y1) / 2, z + rng:NextNumber(-2, 2)), Color3.fromRGB(60, 150, 70), Enum.Material.Grass)
+		if clear then
+			placed += 1
+			local kind = rng:NextInteger(1, 3)
+			local facing = CFrame.new(position) * CFrame.Angles(0, rng:NextNumber(0, math.pi * 2), 0)
+			if kind == 1 then
+				local size = rng:NextNumber(4, 8)
+				if not mesh("Coral", decor, facing * CFrame.new(0, size * 0.35, 0), size) then
+					part(decor, "Coral", Vector3.new(size, size * 0.6, size), facing * CFrame.new(0, size * 0.3, 0), Color3.fromHSV(rng:NextNumber(0.85, 1.05) % 1, 0.6, 1), Enum.Material.Pebble, { Shape = Enum.PartType.Ball })
+				end
+			elseif kind == 2 then
+				local height = rng:NextNumber(10, 22)
+				if not mesh("Kelp", decor, facing * CFrame.new(0, height / 2, 0), height) then
+					part(decor, "Kelp", Vector3.new(1.2, height, 1.2), facing * CFrame.new(0, height / 2, 0), Color3.fromRGB(60, 150, 70), Enum.Material.Grass, { CanCollide = false })
+				end
+			else
+				terrain:FillBall(position + Vector3.new(0, -1, 0), rng:NextNumber(3, 8), Enum.Material.Rock)
 			end
 		end
 	end
-	hazardBar(m, "Eel", Vector3.new(1.5, 1.5, 6), Vector3.new(-16, 8, 36), { MoveOffset = Vector3.new(32, 0, 0), MoveTime = 2.5 })
-	hazardBar(m, "Eel", Vector3.new(1.5, 1.5, 6), Vector3.new(16, 15, 60), { MoveOffset = Vector3.new(-32, 0, 0), MoveTime = 3 })
-	catchSpot(m, Vector3.new(-4, 4, 24), false)
-	catchSpot(m, Vector3.new(12, 12, 48), false)
-	catchSpot(m, Vector3.new(4, 18, 68), true)
+end
+harbor.Parent = workspace
+
+-- 4. Trench chunk templates. Local origin = top centre of an 80-stud slice of the shaft (y goes down to -80);
+-- open water within 22 studs of the axis. See Trench.luau for the attributes.
+local CHUNK_HEIGHT = 80
+local INNER = 18 -- keep things within this radius so they never sit inside the walls
+
+local function newChunk(name, difficulty)
+	local m = Instance.new("Model")
+	m.Name = name
+	m:SetAttribute("Difficulty", difficulty)
+	m.PrimaryPart = part(m, "Origin", Vector3.new(1, 1, 1), Vector3.zero, Color3.new(), nil, { Transparency = 1, CanCollide = false, CanQuery = false, CanTouch = false })
+	m.Parent = templates
+	return m
 end
 
-do -- 4. Jelly Drift: rows of jellyfish bobbing up and down out of sync
-	local m = newCave("JellyDrift", { length = 80, difficulty = 2 })
-	for row, z in { 15, 27, 39, 51, 63 } do
-		for col, x in { -15, -7.5, 0, 7.5, 15 } do
-			local jelly = hazardBall(m, "Jelly", 5, Vector3.new(x, 1, z), Color3.fromRGB(255, 120, 200), Enum.Material.Neon, {
-				MoveOffset = Vector3.new(0, 17, 0),
-				MoveTime = 1.6 + row * 0.15,
-				MovePhase = (row * 0.2 + col * 0.35) % 1,
+local function marker(m, name, pos, attributes)
+	return part(m, name, Vector3.new(1, 1, 1), pos, Color3.new(1, 1, 1), nil, { Transparency = 1, CanCollide = false, CanTouch = false, CanQuery = false, Attributes = attributes })
+end
+
+local function catchSpot(m, pos, hard)
+	marker(m, "CatchSpot", pos, { Hard = hard })
+end
+
+local function bubbleSpot(m, pos)
+	marker(m, "BubbleSpot", pos)
+end
+
+local function rockBlock(m, size, at, material)
+	return part(m, "TerrainRock", size, at, Color3.fromRGB(90, 90, 100), Enum.Material.Rock, { Transparency = 0.5, Attributes = { Terrain = material or "Rock" } })
+end
+
+local function rockBall(m, pos, radius, material)
+	return part(m, "TerrainRock", Vector3.new(radius * 2, radius * 2, radius * 2), pos, Color3.fromRGB(90, 90, 100), Enum.Material.Rock, { Shape = Enum.PartType.Ball, Transparency = 0.5, Attributes = { Terrain = material or "Rock" } })
+end
+
+-- A rock shelf across the whole shaft at height y with one square hole (centre hx, hz; side hs).
+local function shelf(m, y, hx, hz, hs, material)
+	local W = 76
+	local xa, xb, za, zb = hx - hs / 2, hx + hs / 2, hz - hs / 2, hz + hs / 2
+	rockBlock(m, Vector3.new(xa + W / 2, 4, W), Vector3.new((xa - W / 2) / 2, y, 0), material)
+	rockBlock(m, Vector3.new(W / 2 - xb, 4, W), Vector3.new((xb + W / 2) / 2, y, 0), material)
+	rockBlock(m, Vector3.new(hs, 4, za + W / 2), Vector3.new(hx, y, (za - W / 2) / 2), material)
+	rockBlock(m, Vector3.new(hs, 4, W / 2 - zb), Vector3.new(hx, y, (zb + W / 2) / 2), material)
+end
+
+local function hazard(m, name, size, at, modelName, attributes, ball)
+	attributes = attributes or {}
+	attributes.Hazard = true
+	attributes.Model = modelName
+	return part(m, name, size, at, Color3.fromRGB(150, 20, 60), Enum.Material.Slate, {
+		Shape = ball and Enum.PartType.Ball or Enum.PartType.Block,
+		CanCollide = attributes.MoveOffset == nil and attributes.SpinSpeed == nil,
+		Attributes = attributes,
+	})
+end
+
+local function urchin(m, pos, attributes)
+	return hazard(m, "Urchin", Vector3.new(4, 4, 4), pos, "Urchin", attributes, true)
+end
+
+local function jelly(m, pos, attributes)
+	return hazard(m, "Jelly", Vector3.new(5, 5, 5), pos, "Jellyfish", attributes, true)
+end
+
+local function eel(m, pos, attributes)
+	return hazard(m, "Eel", Vector3.new(5, 5, 5), pos, "Eel", attributes, true)
+end
+
+-- A kelp stalk made of stacked 12-stud pieces, so the kelp mesh keeps its proportions.
+local function kelp(m, pos, height)
+	local pieces = math.max(1, math.floor(height / 12))
+	for i = 0, pieces - 1 do
+		local y = pos.Y + height / 2 - 6 - i * 12
+		part(m, "Kelp", Vector3.new(2, 12, 2), CFrame.new(pos.X, y, pos.Z) * CFrame.Angles(0, math.rad(i * 70), 0), Color3.fromRGB(60, 150, 70), Enum.Material.Grass, { Attributes = { Model = "Kelp" } })
+	end
+end
+
+local function coral(m, pos, size)
+	part(m, "Coral", Vector3.new(size, size * 0.7, size), pos, Color3.fromRGB(255, 120, 150), Enum.Material.Pebble, { CanCollide = false, CanQuery = false, CanTouch = false, Attributes = { Model = "Coral" } })
+end
+
+local function current(m, size, at, velocity)
+	part(m, "Current", size, at, Color3.fromRGB(170, 230, 255), Enum.Material.Glass, {
+		Transparency = 0.92,
+		CanCollide = false,
+		CanQuery = true, -- the client finds current zones with a spatial query
+		CanTouch = false,
+		CastShadow = false,
+		Attributes = { Current = velocity },
+	})
+end
+
+local function randomInDisc(rng, radius)
+	local angle, distance = rng:NextNumber(0, math.pi * 2), math.sqrt(rng:NextNumber()) * radius
+	return math.cos(angle) * distance, math.sin(angle) * distance
+end
+
+do -- Open Reef (1): a gentle start with coral on the walls
+	local m = newChunk("OpenReef", 1)
+	rockBall(m, Vector3.new(19, -25, 0), 7)
+	rockBall(m, Vector3.new(-17, -55, 9), 8)
+	coral(m, Vector3.new(14, -20, 0), 5)
+	coral(m, Vector3.new(-12, -50, 7), 6)
+	urchin(m, Vector3.new(6, -35, -10))
+	urchin(m, Vector3.new(-10, -62, -4))
+	urchin(m, Vector3.new(12, -70, 8))
+	catchSpot(m, Vector3.new(-6, -30, 6), false)
+	catchSpot(m, Vector3.new(8, -58, -6), false)
+	catchSpot(m, Vector3.new(-16, -63, 13), true)
+	bubbleSpot(m, Vector3.new(0, -45, 12))
+end
+
+do -- Ledge Steps (1): three shelves, each with one hole in a different place
+	local m = newChunk("LedgeSteps", 1)
+	shelf(m, -15, 10, 0, 12)
+	shelf(m, -40, -10, 6, 12)
+	shelf(m, -65, 4, -10, 12)
+	coral(m, Vector3.new(-10, -11, -8), 5)
+	urchin(m, Vector3.new(-12, -36, -12))
+	catchSpot(m, Vector3.new(-12, -10, 10), false)
+	catchSpot(m, Vector3.new(14, -35, 10), false)
+	catchSpot(m, Vector3.new(-15, -60, -14), true)
+	bubbleSpot(m, Vector3.new(4, -52, -10))
+end
+
+do -- Kelp Forest (1): weave through tall kelp
+	local m = newChunk("KelpForest", 1)
+	local rng = Random.new(3)
+	for _ = 1, 16 do
+		local x, z = randomInDisc(rng, INNER)
+		kelp(m, Vector3.new(x, -40, z), 74)
+	end
+	catchSpot(m, Vector3.new(5, -25, -5), false)
+	catchSpot(m, Vector3.new(-8, -55, 4), false)
+	catchSpot(m, Vector3.new(0, -70, 0), true)
+	bubbleSpot(m, Vector3.new(-6, -40, -10))
+end
+
+do -- Urchin Field (2): urchins everywhere, three of them patrolling
+	local m = newChunk("UrchinField", 2)
+	local rng = Random.new(5)
+	for _ = 1, 16 do
+		local x, z = randomInDisc(rng, INNER)
+		urchin(m, Vector3.new(x, rng:NextNumber(-74, -6), z))
+	end
+	urchin(m, Vector3.new(-18, -25, 0), { MoveOffset = Vector3.new(36, 0, 0), MoveTime = 2.5 })
+	urchin(m, Vector3.new(0, -45, -18), { MoveOffset = Vector3.new(0, 0, 36), MoveTime = 3 })
+	urchin(m, Vector3.new(18, -65, 0), { MoveOffset = Vector3.new(-36, 0, 0), MoveTime = 2 })
+	catchSpot(m, Vector3.new(10, -18, 10), false)
+	catchSpot(m, Vector3.new(-10, -48, -10), false)
+	catchSpot(m, Vector3.new(0, -66, 0), true)
+	bubbleSpot(m, Vector3.new(-12, -32, 12))
+end
+
+do -- Jelly Column (2): jellyfish bobbing up and down out of sync
+	local m = newChunk("JellyColumn", 2)
+	local index = 0
+	for ring = 1, 2 do
+		for i = 1, 6 do
+			index += 1
+			local angle = math.rad(i * 60 + ring * 30)
+			local radius = ring * 8
+			jelly(m, Vector3.new(math.cos(angle) * radius, -70, math.sin(angle) * radius), {
+				MoveOffset = Vector3.new(0, 55, 0),
+				MoveTime = 2.4 + (index % 3) * 0.4,
+				MovePhase = (index * 0.17) % 1,
 			})
-			jelly.Transparency = 0.3
 		end
 	end
-	catchSpot(m, Vector3.new(0, 10, 21), false)
-	catchSpot(m, Vector3.new(-11, 10, 45), false)
-	catchSpot(m, Vector3.new(15, 18, 57), true)
+	catchSpot(m, Vector3.new(0, -40, 0), false)
+	catchSpot(m, Vector3.new(14, -25, -6), false)
+	catchSpot(m, Vector3.new(-12, -62, 10), true)
+	bubbleSpot(m, Vector3.new(4, -52, 16))
 end
 
-do -- 5. Current Tunnel: currents push you back, into a spiky wall, then up into a spiky roof
-	local m = newCave("CurrentTunnel", { length = 100, width = 24, height = 20, difficulty = 2 })
-	local function current(za, zb, velocity)
-		part(m, "Current", Vector3.new(24, 20, zb - za), Vector3.new(0, 8, (za + zb) / 2), Color3.fromRGB(170, 230, 255), Enum.Material.Glass, {
-			Transparency = 0.9,
-			CanCollide = false,
-			CanQuery = true, -- the client finds current zones with a spatial query
-			CanTouch = false,
-			CastShadow = false,
-			Attributes = { Current = velocity },
-		})
+do -- Current Shaft (2): an updraft on one side, a downdraft lined with urchins on the other
+	local m = newChunk("CurrentShaft", 2)
+	current(m, Vector3.new(22, 76, 44), CFrame.new(-11, -40, 0), Vector3.new(0, 14, 0))
+	current(m, Vector3.new(22, 76, 44), CFrame.new(11, -40, 0), Vector3.new(0, -12, 0))
+	for y = -15, -70, -14 do
+		urchin(m, Vector3.new(16, y, (y % 28 == 0) and 6 or -6))
 	end
-	current(14, 36, Vector3.new(0, 0, -12))
-	current(46, 66, Vector3.new(14, 0, 0))
-	current(74, 94, Vector3.new(0, 12, 0))
-	hazardBar(m, "SpikeWall", Vector3.new(2, 20, 20), Vector3.new(11, 8, 56))
-	hazardBar(m, "SpikeRoof", Vector3.new(24, 2, 20), Vector3.new(0, 17, 84))
-	catchSpot(m, Vector3.new(0, 1, 25), false)
-	catchSpot(m, Vector3.new(-8, 8, 56), false)
-	catchSpot(m, Vector3.new(6, 13, 84), true)
+	catchSpot(m, Vector3.new(-12, -30, 0), false)
+	catchSpot(m, Vector3.new(8, -50, 0), false)
+	catchSpot(m, Vector3.new(-14, -68, -8), true)
+	bubbleSpot(m, Vector3.new(-8, -55, 10))
 end
 
-do -- 6. Spike Roof: you float upward and the whole roof is spiked, so stay low under the arches
-	local m, d = newCave("SpikeRoof", { length = 80, difficulty = 3 })
-	hazardBar(m, "SpikeRoof", Vector3.new(40, 2, 96), Vector3.new(0, d.y1 - 1, 40))
-	wallWithHole(m, d, 20, -8, 3, 14, 9)
-	wallWithHole(m, d, 40, 8, 3, 14, 9)
-	wallWithHole(m, d, 60, 0, 3, 14, 9)
-	urchin(m, Vector3.new(0, 0, 30))
-	urchin(m, Vector3.new(-10, 0, 50))
-	catchSpot(m, Vector3.new(6, 3, 30), false)
-	catchSpot(m, Vector3.new(-4, 3, 50), false)
-	catchSpot(m, Vector3.new(12, 16, 70), true)
-end
-
-do -- 7. Deep Shaft: swim down against your own buoyancy through shelves with offset holes
-	local m, d = newCave("DeepShaft", { length = 24, width = 28, height = 64, bottom = -56, start = Vector3.new(0, 0, 0), exit = Vector3.new(0, -51, 24), difficulty = 3 })
-	shelfWithHole(m, d, -10, 8, 4, 9, 9)
-	shelfWithHole(m, d, -22, -8, 20, 9, 9)
-	shelfWithHole(m, d, -34, 8, 20, 9, 9)
-	shelfWithHole(m, d, -44, -8, 4, 9, 9)
-	urchin(m, Vector3.new(-6, -28, 8))
-	urchin(m, Vector3.new(6, -40, 12))
-	urchin(m, Vector3.new(0, -16, 14), { MoveOffset = Vector3.new(0, 0, -12), MoveTime = 2 })
-	urchin(m, Vector3.new(6, -51, 6))
-	catchSpot(m, Vector3.new(-8, -16, 4), false)
-	catchSpot(m, Vector3.new(8, -28, 12), false)
-	catchSpot(m, Vector3.new(11, -53, 2), true)
-end
-
-do -- 8. Windmills: spinning blades across the tunnel; time your swim or squeeze through a corner
-	local m = newCave("Windmills", { length = 70, difficulty = 3 })
-	for i, z in { 20, 40, 58 } do
-		local speed = i % 2 == 0 and -70 or 55
+do -- Windmills (3): spinning blades sweep the whole shaft; slip through between them
+	local m = newChunk("Windmills", 3)
+	for i, y in { -22, -56 } do
 		for _, angle in { 0, 90 } do
-			hazardBar(m, "Blade", Vector3.new(36, 2, 2), CFrame.new(0, 10, z) * CFrame.Angles(0, 0, math.rad(angle)), { SpinSpeed = speed, SpinAxis = "Z" })
+			hazard(m, "Blade", Vector3.new(46, 2, 3), CFrame.new(0, y, 0) * CFrame.Angles(0, math.rad(angle), 0), nil, { SpinSpeed = i == 1 and 55 or -70, SpinAxis = "Y" })
 		end
 	end
-	catchSpot(m, Vector3.new(-15, 0, 30), false)
-	catchSpot(m, Vector3.new(15, 18, 50), false)
-	catchSpot(m, Vector3.new(0, 10, 49), true)
+	catchSpot(m, Vector3.new(10, -38, 10), false)
+	catchSpot(m, Vector3.new(-12, -70, -6), false)
+	catchSpot(m, Vector3.new(0, -12, 0), true)
+	bubbleSpot(m, Vector3.new(-10, -40, -10))
 end
 
-return ("Built harbor with %d plots and %d floor templates"):format(#plots:GetChildren(), #templates:GetChildren())
+do -- Eel Den (3): eels patrol across the shaft between two shelves
+	local m = newChunk("EelDen", 3)
+	shelf(m, -10, -8, -8, 12)
+	shelf(m, -70, 8, 8, 12)
+	eel(m, Vector3.new(-18, -25, 6), { MoveOffset = Vector3.new(36, 0, 0), MoveTime = 2 })
+	eel(m, Vector3.new(18, -40, -6), { MoveOffset = Vector3.new(-36, 0, 0), MoveTime = 2.4 })
+	eel(m, Vector3.new(-18, -55, 0), { MoveOffset = Vector3.new(36, 0, 0), MoveTime = 1.8, MovePhase = 0.5 })
+	catchSpot(m, Vector3.new(14, -18, 14), false)
+	catchSpot(m, Vector3.new(-14, -48, -12), false)
+	catchSpot(m, Vector3.new(0, -64, 0), true)
+	bubbleSpot(m, Vector3.new(10, -32, -12))
+	bubbleSpot(m, Vector3.new(-10, -62, 12))
+end
+
+do -- The Choke (3): a narrow hole ringed with urchins, rare catches beside it
+	local m = newChunk("TheChoke", 3)
+	shelf(m, -40, 0, 0, 9, "Basalt")
+	for i = 0, 5 do
+		local angle = math.rad(i * 60)
+		urchin(m, Vector3.new(math.cos(angle) * 8, -35, math.sin(angle) * 8))
+	end
+	urchin(m, Vector3.new(0, -20, 0), { MoveOffset = Vector3.new(0, -12, 0), MoveTime = 1.6 })
+	catchSpot(m, Vector3.new(14, -30, 10), true)
+	catchSpot(m, Vector3.new(-12, -55, -12), false)
+	catchSpot(m, Vector3.new(10, -70, -10), true)
+	bubbleSpot(m, Vector3.new(-14, -25, 8))
+	bubbleSpot(m, Vector3.new(12, -50, 12))
+end
+
+return ("Built the hub (%d domes) and %d trench chunk templates"):format(#domes:GetChildren(), #templates:GetChildren())

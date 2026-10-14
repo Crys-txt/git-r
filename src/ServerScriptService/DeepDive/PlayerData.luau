@@ -1,5 +1,5 @@
 -- Loads, holds and saves each player's permanent progress.
--- catches = fish you own (shown in the aquarium, sold at the shop); discovered = every species ever caught.
+-- catches = spare fish you can sell; discovered = species on display in your dome (one each, never sold).
 local DataStoreService = game:GetService("DataStoreService")
 
 local PlayerData = {}

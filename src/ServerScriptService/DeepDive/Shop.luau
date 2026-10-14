@@ -1,5 +1,6 @@
--- Dive Shop on the pier: sell catches for pearls, buy equipment tiers.
+-- Dive Shop in the shop dome: sell catches for pearls, buy equipment tiers.
 -- The client calls ShopRequest(action, ...). To add a shop action, add a function to `handlers`.
+-- Fish on display in your dome are not in `catches`, so they can never be sold.
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Config = require(ReplicatedStorage.DeepDive.Config)
@@ -7,11 +8,12 @@ local PlayerData = require(script.Parent.PlayerData)
 local Harbor = require(script.Parent.Harbor)
 
 local Remotes = ReplicatedStorage.DeepDive.Remotes
-local counter = workspace:WaitForChild("Harbor"):WaitForChild("DiveShop"):WaitForChild("Counter")
+local counter = workspace:WaitForChild("Harbor"):WaitForChild("ShopDome"):WaitForChild("Counter")
 
 local MAX_DISTANCE = 25 -- studs from the counter; stops shopping from across the map
 
 local Shop = {}
+Shop.onPurchase = nil -- function(player), set by Main to re-apply equipment stats
 local handlers = {}
 
 -- Returns ok, message. `data` is the player's live profile.
@@ -33,7 +35,7 @@ function handlers.sell(player, data, id, amount)
 	return true, ("Sold %d %s for %d pearls"):format(amount, creature.name, earned)
 end
 
-function handlers.buy(_player, data, itemId)
+function handlers.buy(player, data, itemId)
 	local item = type(itemId) == "string" and Config.getEquipment(itemId)
 	if not item then
 		return false, "That item isn't sold here"
@@ -48,6 +50,9 @@ function handlers.buy(_player, data, itemId)
 	end
 	data.pearls -= tier.price
 	data.equipment[itemId] = nextTier
+	if Shop.onPurchase then
+		Shop.onPurchase(player)
+	end
 	return true, ("Bought %s!"):format(tier.name)
 end
 

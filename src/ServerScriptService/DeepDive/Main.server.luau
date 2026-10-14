@@ -1,35 +1,41 @@
--- Entry point: wires player join/leave, the diving bell, the harbor and autosave together.
+-- Entry point: wires players, the trench, diving, the hub domes, the shop and autosave together.
 local Players = game:GetService("Players")
 
 local PlayerData = require(script.Parent.PlayerData)
 local Harbor = require(script.Parent.Harbor)
+local Trench = require(script.Parent.Trench)
 local Dive = require(script.Parent.Dive)
-require(script.Parent.Shop) -- hooks up the shop remote
+local Shop = require(script.Parent.Shop)
 
 local AUTOSAVE_SECONDS = 120
-local FEED_FROM_FLOOR = 3 -- floors below this are too common to announce
 
-local bellPrompt = workspace.Harbor.DivingBell.Dome.ProximityPrompt
-bellPrompt.Triggered:Connect(Dive.start)
+Trench.onHazard = Dive.onHazard
+Trench.onCatch = Dive.onCatch
+Trench.onBubble = Dive.onBubble
+Dive.homeCFrame = Harbor.homeCFrame
+Shop.onPurchase = Dive.refreshStats
 
-Dive.onFloorCleared = function(player, floor)
-	if floor >= FEED_FROM_FLOOR then
-		Harbor.post(("%s reached floor %d"):format(player.DisplayName, floor))
-	end
+Dive.onZone = function(player, zone, meters)
+	Harbor.post(("%s reached the %s (%d m)"):format(player.DisplayName, zone.name, meters))
 end
 
 Dive.onEnded = function(player, summary)
 	Harbor.refresh(player)
-	if summary.reason == "zoneCleared" then
-		Harbor.post(("%s cleared the Sunlit Reef!"):format(player.DisplayName))
-	elseif summary.reason == "surfaced" and #summary.kept > 0 then
-		Harbor.post(("%s surfaced with %d catches"):format(player.DisplayName, #summary.kept))
+	for _, name in summary.newSpecies do
+		Harbor.post(("%s discovered the %s!"):format(player.DisplayName, name))
+	end
+	if summary.reason == "surfaced" and summary.depth >= 20 then
+		Harbor.post(("%s surfaced from %d m"):format(player.DisplayName, summary.depth))
 	end
 end
 
 local function onPlayerAdded(player)
+	player.CharacterAdded:Connect(function()
+		task.defer(Dive.refreshStats, player)
+	end)
 	if PlayerData.load(player) then
-		Harbor.assignPlot(player)
+		Harbor.assignDome(player)
+		Dive.refreshStats(player)
 	end
 end
 
@@ -40,7 +46,7 @@ end
 
 Players.PlayerRemoving:Connect(function(player)
 	Dive.stop(player, "left")
-	Harbor.releasePlot(player)
+	Harbor.releaseDome(player)
 	PlayerData.release(player)
 end)
 

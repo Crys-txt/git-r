@@ -1,32 +1,16 @@
--- Brings a cloned floor to life: terrain water, moving and spinning hazards, crumbling parts.
--- Behaviour is driven by part names and attributes set in tools/build_world.luau:
---   "Water" part          -> filled with terrain water while the floor exists
+-- Brings a trench chunk to life. Driven by part attributes set in tools/build_world.luau, all in the
+-- chunk's own space (so a rotated chunk still moves things the way it was built):
 --   MoveOffset, MoveTime  -> moves back and forth (MovePhase 0..1 shifts the start of the cycle)
 --   SpinSpeed, SpinAxis   -> spins in degrees per second around "X", "Y" (default) or "Z"
 --   Crumble               -> fades out shortly after someone touches it, then comes back
 --   Current               -> pushes swimmers; applied on the client (DeepDiveEquipment), not here
 local RunService = game:GetService("RunService")
 
-local FloorMechanics = {}
+local Mechanics = {}
 
 local CRUMBLE_WARNING = 0.6
 local CRUMBLE_RESPAWN = 2.5
 local AXES = { X = Vector3.xAxis, Y = Vector3.yAxis, Z = Vector3.zAxis }
-
-local terrain = workspace.Terrain
-
-local function fillWater(floor, volumes)
-	local regions = {}
-	for _, volume in volumes do
-		terrain:FillBlock(volume.CFrame, volume.Size, Enum.Material.Water)
-		table.insert(regions, { cframe = volume.CFrame, size = volume.Size })
-	end
-	floor.Destroying:Connect(function()
-		for _, region in regions do
-			terrain:FillBlock(region.cframe, region.size, Enum.Material.Air)
-		end
-	end)
-end
 
 local function hookCrumble(part)
 	local originalColor, originalTransparency = part.Color, part.Transparency
@@ -54,34 +38,32 @@ local function hookCrumble(part)
 	end)
 end
 
-function FloorMechanics.start(floor)
-	local movers, spinners, water = {}, {}, {}
-	for _, part in floor:GetDescendants() do
+function Mechanics.start(model)
+	local pivot = model:GetPivot()
+	local movers, spinners = {}, {}
+	for _, part in model:GetDescendants() do
 		if not part:IsA("BasePart") then
 			continue
-		end
-		if part.Name == "Water" then
-			table.insert(water, part)
 		end
 		local offset = part:GetAttribute("MoveOffset")
 		if offset then
 			table.insert(movers, {
 				part = part,
 				base = part.CFrame,
-				offset = offset,
+				offset = pivot:VectorToWorldSpace(offset),
 				period = 2 * (part:GetAttribute("MoveTime") or 3),
 				phase = part:GetAttribute("MovePhase") or 0,
 			})
 		end
 		local spin = part:GetAttribute("SpinSpeed")
 		if spin then
-			table.insert(spinners, { part = part, speed = math.rad(spin), axis = AXES[part:GetAttribute("SpinAxis") or "Y"] })
+			local axis = pivot:VectorToWorldSpace(AXES[part:GetAttribute("SpinAxis") or "Y"])
+			table.insert(spinners, { part = part, speed = math.rad(spin), axis = axis })
 		end
 		if part:GetAttribute("Crumble") then
 			hookCrumble(part)
 		end
 	end
-	fillWater(floor, water)
 	if #movers == 0 and #spinners == 0 then
 		return
 	end
@@ -89,7 +71,7 @@ function FloorMechanics.start(floor)
 	local started = os.clock()
 	local connection
 	connection = RunService.Heartbeat:Connect(function(dt)
-		if not floor.Parent then
+		if not model.Parent then
 			connection:Disconnect()
 			return
 		end
@@ -107,4 +89,4 @@ function FloorMechanics.start(floor)
 	end)
 end
 
-return FloorMechanics
+return Mechanics

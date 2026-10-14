@@ -1,4 +1,4 @@
--- Dive Shop window: sell catches for pearls and buy equipment. Opens from the counter's prompt on the pier.
+-- Dive Shop window: sell catches for pearls and buy equipment. Opens when you talk to the shopkeeper.
 -- Equipment rows come straight from Config.Equipment, so new items and tiers show up without UI changes.
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -8,8 +8,9 @@ local Config = require(shared:WaitForChild("Config"))
 local Ui = require(shared:WaitForChild("Ui"))
 local Remotes = shared:WaitForChild("Remotes")
 local player = Players.LocalPlayer
-local counter = workspace:WaitForChild("Harbor"):WaitForChild("DiveShop"):WaitForChild("Counter")
-local prompt = counter:WaitForChild("ProximityPrompt")
+local shopDome = workspace:WaitForChild("Harbor"):WaitForChild("ShopDome")
+local counter = shopDome:WaitForChild("Counter")
+local prompt = shopDome:WaitForChild("Shopkeeper"):WaitForChild("HumanoidRootPart"):WaitForChild("ShopPrompt")
 
 local CLOSE_DISTANCE = 20
 
